@@ -1,5 +1,3 @@
-import React from 'react';
-import { StyleSheet, Text, View } from 'react-native';
 import { Verdict } from '../engine';
 import { colors } from '../theme';
 
@@ -12,22 +10,11 @@ const COLOR: Record<Verdict, string> = {
 export function VerdictPill({ verdict }: { verdict: Verdict }) {
   const color = COLOR[verdict];
   return (
-    <View style={[styles.pill, { borderColor: color, backgroundColor: color + '22' }]}>
-      <Text style={[styles.text, { color }]}>{verdict}</Text>
-    </View>
+    <span
+      className="inline-block rounded-full border px-3 py-[5px] text-[13px] font-bold"
+      style={{ color, borderColor: color, backgroundColor: color + '22' }}
+    >
+      {verdict}
+    </span>
   );
 }
-
-const styles = StyleSheet.create({
-  pill: {
-    alignSelf: 'flex-start',
-    paddingHorizontal: 12,
-    paddingVertical: 5,
-    borderRadius: 999,
-    borderWidth: 1,
-  },
-  text: {
-    fontSize: 13,
-    fontWeight: '700',
-  },
-});

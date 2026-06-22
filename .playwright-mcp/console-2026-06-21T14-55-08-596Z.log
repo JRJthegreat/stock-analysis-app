@@ -3,3 +3,13 @@
  {rootTag: #root, hydrate: undefined} 
 Development-level warnings: ON.
 Performance optimizations: OFF. @ http://localhost:8081/index.ts.bundle?platform=web&dev=true&hot=false&lazy=true&transform.engine=hermes&transform.routerRoot=app&unstable_transformProfile=hermes-stable:4278
+[ 9526670ms] [ERROR] WebSocket connection to 'ws://localhost:8081/message' failed:  @ http://localhost:8081/index.ts.bundle?platform=web&dev=true&hot=false&lazy=true&transform.engine=hermes&transform.routerRoot=app&unstable_transformProfile=hermes-stable:3656
+[ 9526671ms] [ERROR] WebSocket connection to 'ws://localhost:8081/hot' failed:  @ http://localhost:8081/index.ts.bundle?platform=web&dev=true&hot=false&lazy=true&transform.engine=hermes&transform.routerRoot=app&unstable_transformProfile=hermes-stable:1809
+[ 9527176ms] [WARNING] Cannot connect to Metro.
+ 
+ Try the following to fix the issue:
+ - Ensure the Metro dev server is running and available on the same network as this device
+ 
+ URL: localhost:8081
+ 
+ Error: undefined @ http://localhost:8081/index.ts.bundle?platform=web&dev=true&hot=false&lazy=true&transform.engine=hermes&transform.routerRoot=app&unstable_transformProfile=hermes-stable:1732

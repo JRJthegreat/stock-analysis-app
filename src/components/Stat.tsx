@@ -1,30 +1,9 @@
-import React from 'react';
-import { StyleSheet, Text, View } from 'react-native';
-import { colors } from '../theme';
-
-/** One label/value pair inside a metrics grid. */
+/** One label/value pair inside a metrics grid. The parent owns the grid columns. */
 export function Stat({ label, value }: { label: string; value: string }) {
   return (
-    <View style={styles.cell}>
-      <Text style={styles.label}>{label}</Text>
-      <Text style={styles.value}>{value}</Text>
-    </View>
+    <div className="py-2">
+      <div className="mb-0.5 text-xs text-muted">{label}</div>
+      <div className="text-[17px] font-semibold text-fg">{value}</div>
+    </div>
   );
 }
-
-const styles = StyleSheet.create({
-  cell: {
-    width: '50%',
-    paddingVertical: 8,
-  },
-  label: {
-    color: colors.subtext,
-    fontSize: 12,
-    marginBottom: 2,
-  },
-  value: {
-    color: colors.text,
-    fontSize: 17,
-    fontWeight: '600',
-  },
-});

@@ -1,0 +1,58 @@
+@import "tailwindcss";
+
+/*
+ * Dark theme tokens. These MUST mirror the hex values in src/theme.ts (which the
+ * JS layer uses for runtime-driven colors + alpha compositing). Keep them in sync.
+ * Each token becomes Tailwind utilities, e.g. --color-accent → bg-accent / text-accent.
+ */
+@theme {
+  --color-bg: #0b0e14;
+  --color-card: #151a23;
+  --color-border: #222a36;
+  --color-fg: #e6eaf0;
+  --color-muted: #8a93a3;
+  --color-accent: #4f8cff;
+  --color-green: #2ecc71;
+  --color-red: #ff5c5c;
+  --color-amber: #f5a623;
+}
+
+html,
+body {
+  background-color: var(--color-bg);
+  color: var(--color-fg);
+  color-scheme: dark;
+}
+
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Range input styled to the dark theme (the accent "filled" portion is set
+   inline as a gradient driven by the current value). See components/Slider.tsx. */
+.slider-input {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 6px;
+  border-radius: 9999px;
+  outline: none;
+  cursor: pointer;
+}
+.slider-input::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 9999px;
+  background: var(--color-fg);
+  border: 2px solid var(--color-accent);
+  cursor: pointer;
+}
+.slider-input::-moz-range-thumb {
+  width: 20px;
+  height: 20px;
+  border-radius: 9999px;
+  background: var(--color-fg);
+  border: 2px solid var(--color-accent);
+  cursor: pointer;
+}

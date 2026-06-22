@@ -1,8 +1,8 @@
 import { defineConfig } from 'vitest/config';
 
 /**
- * Vitest config — DEV-ONLY. The app (Metro/Expo Go) never imports this file or
- * any test, so it cannot affect the SDK 54 bundle. Tests target the pure engine.
+ * Vitest config — DEV-ONLY. The Next.js app never imports this file or any test,
+ * so it cannot affect the production bundle. Tests target the pure engine.
  *
  * `globals: false` (the default) is intentional: tests use explicit
  * `import { describe, it, expect } from 'vitest'` so vitest's globals never leak

@@ -1,4 +1,10 @@
-/** Minimal dark theme tokens. Centralized so the UI stays consistent. */
+/**
+ * Dark theme color tokens for runtime-driven styling (dynamic pill colors, alpha
+ * compositing, the SVG sparkline stroke) where a static Tailwind class can't be
+ * used. Static layout/styling uses Tailwind utilities instead.
+ *
+ * These MUST mirror the @theme tokens in src/app/globals.css. Keep them in sync.
+ */
 export const colors = {
   bg: '#0B0E14',
   card: '#151A23',
@@ -9,11 +15,4 @@ export const colors = {
   green: '#2ECC71',
   red: '#FF5C5C',
   amber: '#F5A623',
-};
-
-export const spacing = {
-  xs: 4,
-  sm: 8,
-  md: 16,
-  lg: 24,
 };
