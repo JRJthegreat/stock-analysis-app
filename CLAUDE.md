@@ -108,12 +108,17 @@ supabase/                # Deno edge functions + cache migration (excluded from 
 ```bash
 cd /Users/air/stock-analysis-app
 npm run dev               # next dev → http://localhost:3000
-npm run build             # next build (production; also type-checks)
-npm start                 # serve the production build
+npm run build             # next build → static export in ./out (also type-checks)
+npx serve out             # preview the production export (NOT `npm start`/`next start` — see note)
 
 npm test                  # Vitest — engine unit tests (vitest run)
-npx tsc --noEmit          # typecheck (strict mode)
+npm test -- valuation     # run a single spec by name (matches the file path/title)
+npm run typecheck         # tsc --noEmit (strict mode); `npx tsc --noEmit` also works
+npm run lint              # next lint
 ```
+
+> Because `next.config.mjs` sets `output: 'export'`, **`npm start` (`next start`) does not work** —
+> there is no Node server. Serve the static `./out` directory with any static file server instead.
 
 **Verification gates:** `npm test` (engine math), `npx tsc --noEmit`, and `npm run build` must all
 stay green. Tests are **Vitest** (a devDependency only — never imported by app code, never bundled).
@@ -178,7 +183,12 @@ expectations. Keep new tests on `src/engine/` (pure functions); the UI layer is 
    use the reverse-engineered private API (ToS violation, handles raw credentials). When added, use an
    aggregator — **SnapTrade** (read holdings + optional trading) or **Plaid Investments** (read-only).
    OAuth token exchange must be server-side (Supabase).
-10. **Production distribution:** deploy the Next app to **Vercel** (or any Node host) via `npm run build`.
+10. **Production distribution — Azure Static Web Apps (configured):** the app is a Next.js **static export**
+    (`output: 'export'` → `./out`; no SSR — all backend logic is in Supabase functions). CI/CD in
+    `.github/workflows/azure-static-web-apps.yml` runs tests, builds, and uploads `out/` to SWA; routing in
+    `public/staticwebapp.config.json`. One-time: `az staticwebapp create` + set the
+    `AZURE_STATIC_WEB_APPS_API_TOKEN` GitHub secret. The Supabase backend deploys independently. (If SSR is
+    ever needed, drop `output: 'export'` and host on Azure App Service / a container running `next start`.)
     Trading, if enabled, is regulated — the owner owns the compliance/legal posture.
 
 ## Security flags (before any public release)

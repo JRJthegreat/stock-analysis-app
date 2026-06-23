@@ -1,0 +1,50 @@
+name: Azure Static Web Apps CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, closed]
+
+# Public client config — these are the SAME values shipped in the browser bundle
+# (anon key + project URL), NOT secrets. They must be present at build time so Next
+# inlines them into the static export. (Prefer them as repo Variables? Swap to
+# ${{ vars.NEXT_PUBLIC_SUPABASE_URL }} etc. and set with `gh variable set`.)
+env:
+  NEXT_PUBLIC_SUPABASE_URL: https://lcfatnkvvjwaxlbfaqij.supabase.co
+  NEXT_PUBLIC_SUPABASE_ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxjZmF0bmt2dmp3YXhsYmZhcWlqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODIwNTQyMzgsImV4cCI6MjA5NzYzMDIzOH0.QH2KLyMduZdAwUmEUWBlMDRvXg_EE8JTOz3hKal1ixg
+
+jobs:
+  build_and_deploy:
+    if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.action != 'closed')
+    runs-on: ubuntu-latest
+    name: Build and deploy
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: npm ci
+      - run: npm test          # 44 engine unit tests must pass before deploy
+      - run: npm run build      # next build → static export in ./out
+      - name: Deploy to Azure Static Web Apps
+        uses: Azure/static-web-apps-deploy@v1
+        with:
+          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
+          action: upload
+          # We build above; just upload the static export. No Oryx/Next build in SWA.
+          app_location: "out"
+          output_location: ""
+          skip_app_build: true
+
+  close_pull_request:
+    if: github.event_name == 'pull_request' && github.event.action == 'closed'
+    runs-on: ubuntu-latest
+    name: Close PR staging environment
+    steps:
+      - name: Close staging environment
+        uses: Azure/static-web-apps-deploy@v1
+        with:
+          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
+          action: close

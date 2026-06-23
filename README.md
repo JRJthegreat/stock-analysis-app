@@ -4,7 +4,7 @@ A web app that turns a stock ticker into a rigorous, **trustworthy** fundamental
 a multi-stage DCF valuation with a bear/base/bull range, quality & bankruptcy scores, peer comps, and
 an AI investment thesis — all computed from **live market data**.
 
-> **Live demo:** _add your Vercel URL here_ · educational tooling, **not investment advice**.
+> **Live demo:** **https://ashy-stone-0bac73800.7.azurestaticapps.net** · educational tooling, **not investment advice**.
 
 ![Stock Analyst — live analysis of AAPL](docs/screenshot-app.png)
 
@@ -122,17 +122,31 @@ supabase secrets set SIMFIN_API_KEY=… ANTHROPIC_API_KEY=… THESIS_DAILY_CAP=2
 supabase functions deploy simfin-proxy thesis-proxy --project-ref <ref>
 ```
 
-## Deployment
+## Deployment (Azure Static Web Apps)
 
-The frontend is a standard Next.js app — deploy to **Vercel** with zero config:
+The frontend is a Next.js **static export** (`output: 'export'` → `./out`) hosted on **Azure Static
+Web Apps**. CI/CD is wired in `.github/workflows/azure-static-web-apps.yml` (runs the engine tests,
+builds the export, uploads `out/`, and creates a preview URL per PR). The Supabase backend deploys
+independently and needs no change (its CORS already allows any origin).
+
+One-time setup:
 
 ```bash
-npx vercel            # first deploy (links the project)
-npx vercel --prod     # production
+# 1) Create the SWA resource + read its deploy token (needs `az login`)
+az staticwebapp create -n stock-analyst -g <resource-group> -l eastus2
+az staticwebapp secrets list -n stock-analyst -g <resource-group> \
+  --query "properties.apiKey" -o tsv
+
+# 2) Store that token as a GitHub repo secret
+gh secret set AZURE_STATIC_WEB_APPS_API_TOKEN -b "<token-from-step-1>"
+
+# 3) Deploy
+git push origin main      # the workflow builds + uploads ./out
 ```
 
-Set `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` as Vercel project env vars. The
-backend (Supabase edge functions) is deployed independently and needs no change.
+The public client config (`NEXT_PUBLIC_SUPABASE_*`) is injected at build time inside the workflow;
+SWA routing/headers live in `public/staticwebapp.config.json`. Paste the resulting `*.azurestaticapps.net`
+URL into the "Live demo" line above.
 
 ## Disclaimer
 
