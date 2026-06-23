@@ -140,6 +140,8 @@ expectations. Keep new tests on `src/engine/` (pure functions); the UI layer is 
   stays pure and synchronous.
 - Public client env vars are **`NEXT_PUBLIC_SUPABASE_*`** (in `.env`). Next only inlines
   `NEXT_PUBLIC_*` into the client bundle — anything else stays server/CLI-side.
+- **Imports use relative paths** (e.g. `'../engine'`). A `@/*` → `./src/*` alias is defined in
+  `tsconfig.json` but is currently **unused** — keep new imports relative for consistency.
 
 ## Roadmap (production plan)
 
