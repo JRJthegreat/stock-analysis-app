@@ -36,13 +36,19 @@ export function SkeletonCard() {
   );
 }
 
-/** A vertical stack of skeleton cards for the initial full-page load. */
+/** Loading placeholder mirroring the analysis layout: a hero band above a
+ *  responsive grid of cards, so the page doesn't jump width when data lands. */
 export function SkeletonScreen() {
   return (
-    <div>
+    <div className="mt-6 space-y-6">
       <SkeletonCard />
-      <SkeletonCard />
-      <SkeletonCard />
+      <div className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-3">
+        <SkeletonCard />
+        <SkeletonCard />
+        <SkeletonCard />
+        <SkeletonCard />
+        <SkeletonCard />
+      </div>
     </div>
   );
 }

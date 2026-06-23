@@ -107,60 +107,64 @@ export default function Page() {
   }, []);
 
   return (
-    <main className="mx-auto min-h-screen max-w-xl px-4 py-4 pb-16">
-      <div className="mt-2 flex items-center justify-between">
-        <h1 className="text-3xl font-extrabold text-fg">Stock Analyst</h1>
+    <main className="mx-auto min-h-screen max-w-6xl px-4 py-6 pb-20 sm:px-6 lg:px-8">
+      <header className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-extrabold text-fg">Stock Analyst</h1>
+          <p className="mt-1 text-sm text-muted">
+            Fundamentals + DCF on live market data
+          </p>
+        </div>
         <button
           type="button"
           onClick={() => setSettingsOpen(true)}
           aria-label="Settings"
-          className="flex h-10 w-10 items-center justify-center rounded-full border border-border bg-card text-xl text-muted"
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-border bg-card text-xl text-muted"
         >
           ⚙
         </button>
-      </div>
-      <p className="mb-6 text-sm text-muted">
-        Fundamentals + DCF on live market data
-      </p>
+      </header>
 
-      <form
-        className="flex gap-2"
-        onSubmit={(e) => {
-          e.preventDefault();
-          void run(input);
-        }}
-      >
-        <input
-          value={input}
-          onChange={(e) => setInput(e.target.value.toUpperCase())}
-          placeholder="Ticker (e.g. AAPL)"
-          autoCapitalize="characters"
-          autoCorrect="off"
-          spellCheck={false}
-          disabled={loading}
-          className="flex-1 rounded-xl border border-border bg-card px-4 py-3 text-base text-fg placeholder:text-muted"
-        />
-        <button
-          type="submit"
-          disabled={loading}
-          className="rounded-xl bg-accent px-4 text-[15px] font-bold text-white disabled:opacity-50"
+      <div className="mt-6 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <form
+          className="flex w-full gap-2 lg:max-w-md"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void run(input);
+          }}
         >
-          Analyze
-        </button>
-      </form>
-
-      <div className="mt-4 flex flex-wrap gap-2">
-        {POPULAR.map((t) => (
-          <button
-            type="button"
-            key={t}
-            onClick={() => void run(t)}
+          <input
+            value={input}
+            onChange={(e) => setInput(e.target.value.toUpperCase())}
+            placeholder="Ticker (e.g. AAPL)"
+            autoCapitalize="characters"
+            autoCorrect="off"
+            spellCheck={false}
             disabled={loading}
-            className="rounded-full border border-border bg-card px-3.5 py-1.5 font-semibold text-muted disabled:opacity-50"
+            className="min-w-0 flex-1 rounded-xl border border-border bg-card px-4 py-3 text-base text-fg placeholder:text-muted"
+          />
+          <button
+            type="submit"
+            disabled={loading}
+            className="shrink-0 rounded-xl bg-accent px-5 text-[15px] font-bold text-white disabled:opacity-50"
           >
-            {t}
+            Analyze
           </button>
-        ))}
+        </form>
+
+        <div className="flex flex-wrap gap-2">
+          {POPULAR.map((t) => (
+            <button
+              type="button"
+              key={t}
+              onClick={() => void run(t)}
+              disabled={loading}
+              className="rounded-full border border-border bg-card px-3.5 py-1.5 font-semibold text-muted disabled:opacity-50"
+            >
+              {t}
+            </button>
+          ))}
+        </div>
       </div>
 
       {loading && <SkeletonScreen />}
