@@ -17,7 +17,7 @@
 // it in the mobile bundle.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
-import { fetchCompanyList, fetchFinancials, fetchPeers, fetchPrices } from "./simfin.ts";
+import { fetchCompanyList, fetchFinancials, fetchPeers, fetchPrices, resolveTicker } from "./simfin.ts";
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
@@ -76,9 +76,13 @@ Deno.serve(async (req) => {
       ticker = ticker || body.ticker || "";
       kind = url.searchParams.get("kind") || body.kind || kind;
     }
-    ticker = ticker.trim().toUpperCase();
+    // Accept a ticker OR a company name ("MU" or "Micron") — names are resolved to
+    // a ticker below via the cached company list. Names carry spaces / & / digits.
+    const query = ticker.trim().toUpperCase().replace(/\s+/g, " ");
     kind = kind.toLowerCase();
-    if (!/^[A-Z.\-]{1,10}$/.test(ticker)) return json({ error: "Invalid or missing ticker" }, 400);
+    if (!/^[A-Z0-9 .&'\-]{1,64}$/.test(query) || !/[A-Z]/.test(query)) {
+      return json({ error: "Invalid or missing ticker" }, 400);
+    }
     if (!KINDS.includes(kind as Kind)) return json({ error: `Invalid kind: ${kind}` }, 400);
 
     const supabase = createClient(
@@ -86,33 +90,46 @@ Deno.serve(async (req) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
     );
     // financials keep the bare ticker as cache key (back-compat); prices/peers get a suffix.
-    const cacheKey = kind === "financials" ? ticker : `${ticker}#${kind}`;
+    const cacheKeyFor = (t: string) => (kind === "financials" ? t : `${t}#${kind}`);
 
-    const respond = (payload: unknown, source: "cache" | "simfin", fetchedAt: string) =>
-      json({ ticker, kind, source, fetchedAt, [kind]: payload });
+    const respond = (t: string, payload: unknown, source: "cache" | "simfin", fetchedAt: string) =>
+      json({ ticker: t, kind, source, fetchedAt, [kind]: payload });
 
-    // 1) Serve from cache if fresh.
-    const cached = await readCache(supabase, cacheKey, TTL_MS);
-    if (cached) return respond(cached.payload, "cache", cached.fetched_at as string);
+    // 1) Fast path: the raw query is itself a fresh cache hit (a ticker seen
+    //    recently). The common case — no company-list load needed.
+    const rawHit = await readCache(supabase, cacheKeyFor(query), TTL_MS);
+    if (rawHit) return respond(query, rawHit.payload, "cache", rawHit.fetched_at as string);
 
-    // 2) Cache miss / stale → fetch SimFin.
+    // 2) Cache miss / stale → we need SimFin.
     const simfinKey = Deno.env.get("SIMFIN_API_KEY");
     if (!simfinKey) return json({ error: "SIMFIN_API_KEY not configured" }, 500);
 
+    // 3) Resolve the query (ticker OR company name) to a canonical ticker via the
+    //    cached company list, so "MICRON" → "MU". Falls back to the raw query.
+    const companyList = await getCompanyList(supabase, simfinKey);
+    const symbol = resolveTicker(query, companyList) ?? query;
+
+    // If resolution changed the symbol, its canonical row may already be cached.
+    if (symbol !== query) {
+      const canonHit = await readCache(supabase, cacheKeyFor(symbol), TTL_MS);
+      if (canonHit) return respond(symbol, canonHit.payload, "cache", canonHit.fetched_at as string);
+    }
+
+    // 4) Fetch from SimFin (reuse the already-loaded list for peers).
     const payload =
       kind === "financials"
-        ? await fetchFinancials(ticker, simfinKey)
+        ? await fetchFinancials(symbol, simfinKey)
         : kind === "prices"
-          ? await fetchPrices(ticker, simfinKey)
-          : await fetchPeers(ticker, simfinKey, await getCompanyList(supabase, simfinKey));
+          ? await fetchPrices(symbol, simfinKey)
+          : await fetchPeers(symbol, simfinKey, companyList);
 
     const fetchedAt = new Date().toISOString();
-    // 3) Store (best effort).
+    // 5) Store (best effort).
     await supabase
       .from("fundamentals_cache")
-      .upsert({ ticker: cacheKey, payload, fetched_at: fetchedAt });
+      .upsert({ ticker: cacheKeyFor(symbol), payload, fetched_at: fetchedAt });
 
-    return respond(payload, "simfin", fetchedAt);
+    return respond(symbol, payload, "simfin", fetchedAt);
   } catch (e) {
     const msg = String((e as Error)?.message ?? e);
     // "No fundamentals/prices for this symbol" or a SimFin non-2xx (obscure / junk

@@ -227,6 +227,45 @@ type CompanyListRow = {
   isin: string | null;
 };
 
+/**
+ * Resolve a user query — a ticker OR a company name — to a canonical SimFin
+ * ticker, using the (cached) company list. Ticker matches win outright; otherwise
+ * match by name (exact → starts-with → whole-word), preferring well-identified,
+ * listed rows and the shortest name (the parent over odd share classes / shells).
+ * Returns null when nothing matches, so the caller can fall back to the raw query.
+ *
+ *   "MU"      → "MU"   (exact ticker)
+ *   "MICRON"  → "MU"   (name starts-with "MICRON TECHNOLOGY INC")
+ *   "APPLE"   → "AAPL" (name starts-with "APPLE INC")
+ */
+export function resolveTicker(query: string, list: CompanyListRow[]): string | null {
+  const q = query.trim().toUpperCase();
+  if (!q) return null;
+
+  // 1) Exact ticker match wins.
+  const byTicker = list.find((c) => c.ticker && c.ticker.toUpperCase() === q);
+  if (byTicker) return byTicker.ticker.toUpperCase();
+
+  // 2) Name-based matching, in descending priority.
+  const named = list.filter((c) => c.name && c.ticker);
+  const exact = named.filter((c) => c.name.toUpperCase() === q);
+  const starts = named.filter((c) => {
+    const n = c.name.toUpperCase();
+    return n === q || n.startsWith(q + " ");
+  });
+  const word = named.filter((c) => c.name.toUpperCase().split(/[^A-Z0-9]+/).includes(q));
+
+  const candidates = exact.length ? exact : starts.length ? starts : word;
+  if (!candidates.length) return null;
+
+  // Prefer well-identified (isin + sectorName), then the shortest name.
+  candidates.sort((a, b) => {
+    const idScore = (c: CompanyListRow) => (c.isin ? 1 : 0) + (c.sectorName ? 1 : 0);
+    return idScore(b) - idScore(a) || a.name.length - b.name.length;
+  });
+  return candidates[0].ticker.toUpperCase();
+}
+
 /** The cached `/companies/list` (huge, ~static) — fetched once and reused. */
 export async function fetchCompanyList(key: string): Promise<CompanyListRow[]> {
   const res = await simfinGet(`/companies/list`, key);

@@ -136,7 +136,7 @@ export default function Page() {
           <input
             value={input}
             onChange={(e) => setInput(e.target.value.toUpperCase())}
-            placeholder="Ticker (e.g. AAPL)"
+            placeholder="Ticker or name (e.g. AAPL or Micron)"
             autoCapitalize="characters"
             autoCorrect="off"
             spellCheck={false}
