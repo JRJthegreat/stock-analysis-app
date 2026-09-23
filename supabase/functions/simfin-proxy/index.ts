@@ -40,7 +40,11 @@ const json = (body: unknown, status = 200) =>
     headers: { ...cors, "content-type": "application/json" },
   });
 
-type Supabase = ReturnType<typeof createClient>;
+// `createClient`'s generics don't unify between the call site and this alias
+// (public vs never schema), so the helpers below take a loose client type — they
+// only do simple reads/writes against one table.
+// deno-lint-ignore no-explicit-any
+type Supabase = any;
 
 /** Read a cache row if present and fresh (within `ttl`), else null. */
 async function readCache(supabase: Supabase, key: string, ttl: number) {
@@ -53,15 +57,33 @@ async function readCache(supabase: Supabase, key: string, ttl: number) {
   return null;
 }
 
+/** Read a cache row at ANY age (used as the last-resort fallback). */
+async function readCacheAnyAge(supabase: Supabase, key: string) {
+  const { data } = await supabase
+    .from("fundamentals_cache")
+    .select("payload, fetched_at")
+    .eq("ticker", key)
+    .maybeSingle();
+  return data ?? null;
+}
+
 /** The cached SimFin company list (for peers), refreshing on a long TTL. */
 async function getCompanyList(supabase: Supabase, key: string) {
   const cached = await readCache(supabase, COMPANY_LIST_KEY, LIST_TTL_MS);
   if (cached) return cached.payload as any[];
-  const list = await fetchCompanyList(key);
-  await supabase
-    .from("fundamentals_cache")
-    .upsert({ ticker: COMPANY_LIST_KEY, payload: list, fetched_at: new Date().toISOString() });
-  return list;
+  try {
+    const list = await fetchCompanyList(key);
+    await supabase
+      .from("fundamentals_cache")
+      .upsert({ ticker: COMPANY_LIST_KEY, payload: list, fetched_at: new Date().toISOString() });
+    return list;
+  } catch (e) {
+    // A stale list is far better than failing the request: it is ~static data and
+    // is only used to resolve names -> tickers and to pick peers.
+    const stale = await readCacheAnyAge(supabase, COMPANY_LIST_KEY);
+    if (stale) return stale.payload as any[];
+    throw e;
+  }
 }
 
 Deno.serve(async (req) => {
@@ -92,8 +114,29 @@ Deno.serve(async (req) => {
     // financials keep the bare ticker as cache key (back-compat); prices/peers get a suffix.
     const cacheKeyFor = (t: string) => (kind === "financials" ? t : `${t}#${kind}`);
 
-    const respond = (t: string, payload: unknown, source: "cache" | "simfin", fetchedAt: string) =>
-      json({ ticker: t, kind, source, fetchedAt, [kind]: payload });
+    const respond = (
+      t: string,
+      payload: unknown,
+      source: "cache" | "simfin" | "cache-stale",
+      fetchedAt: string,
+    ) => json({ ticker: t, kind, source, fetchedAt, stale: source === "cache-stale", [kind]: payload });
+
+    /**
+     * Last line of defence. If SimFin is unreachable or throttling, serve whatever
+     * we cached previously — at ANY age — rather than surfacing an error. A slightly
+     * stale figure beats a broken page, and it means a ticker we have ever fetched
+     * (every default/popular one) can never error on load.
+     */
+    const serveStaleOrThrow = async (keys: string[], err: unknown) => {
+      for (const k of keys) {
+        const stale = await readCacheAnyAge(supabase, k);
+        if (stale) {
+          const t = k.split("#")[0];
+          return respond(t, stale.payload, "cache-stale", stale.fetched_at as string);
+        }
+      }
+      throw err;
+    };
 
     // 1) Fast path: the raw query is itself a fresh cache hit (a ticker seen
     //    recently). The common case — no company-list load needed.
@@ -104,32 +147,42 @@ Deno.serve(async (req) => {
     const simfinKey = Deno.env.get("SIMFIN_API_KEY");
     if (!simfinKey) return json({ error: "SIMFIN_API_KEY not configured" }, 500);
 
-    // 3) Resolve the query (ticker OR company name) to a canonical ticker via the
-    //    cached company list, so "MICRON" → "MU". Falls back to the raw query.
-    const companyList = await getCompanyList(supabase, simfinKey);
-    const symbol = resolveTicker(query, companyList) ?? query;
+    let symbol = query;
+    try {
+      // 3) Resolve the query (ticker OR company name) to a canonical ticker via the
+      //    cached company list, so "MICRON" → "MU". Falls back to the raw query.
+      const companyList = await getCompanyList(supabase, simfinKey);
+      symbol = resolveTicker(query, companyList) ?? query;
 
-    // If resolution changed the symbol, its canonical row may already be cached.
-    if (symbol !== query) {
-      const canonHit = await readCache(supabase, cacheKeyFor(symbol), TTL_MS);
-      if (canonHit) return respond(symbol, canonHit.payload, "cache", canonHit.fetched_at as string);
+      // If resolution changed the symbol, its canonical row may already be cached.
+      if (symbol !== query) {
+        const canonHit = await readCache(supabase, cacheKeyFor(symbol), TTL_MS);
+        if (canonHit) return respond(symbol, canonHit.payload, "cache", canonHit.fetched_at as string);
+      }
+
+      // 4) Fetch from SimFin (reuse the already-loaded list for peers).
+      const payload =
+        kind === "financials"
+          ? await fetchFinancials(symbol, simfinKey)
+          : kind === "prices"
+            ? await fetchPrices(symbol, simfinKey)
+            : await fetchPeers(symbol, simfinKey, companyList);
+
+      const fetchedAt = new Date().toISOString();
+      // 5) Store (best effort).
+      await supabase
+        .from("fundamentals_cache")
+        .upsert({ ticker: cacheKeyFor(symbol), payload, fetched_at: fetchedAt });
+
+      return respond(symbol, payload, "simfin", fetchedAt);
+    } catch (e) {
+      // SimFin failed (throttled, down, or genuinely has no data). Prefer a stale
+      // row for either the resolved symbol or the raw query before erroring.
+      return await serveStaleOrThrow(
+        symbol === query ? [cacheKeyFor(query)] : [cacheKeyFor(symbol), cacheKeyFor(query)],
+        e,
+      );
     }
-
-    // 4) Fetch from SimFin (reuse the already-loaded list for peers).
-    const payload =
-      kind === "financials"
-        ? await fetchFinancials(symbol, simfinKey)
-        : kind === "prices"
-          ? await fetchPrices(symbol, simfinKey)
-          : await fetchPeers(symbol, simfinKey, companyList);
-
-    const fetchedAt = new Date().toISOString();
-    // 5) Store (best effort).
-    await supabase
-      .from("fundamentals_cache")
-      .upsert({ ticker: cacheKeyFor(symbol), payload, fetched_at: fetchedAt });
-
-    return respond(symbol, payload, "simfin", fetchedAt);
   } catch (e) {
     const msg = String((e as Error)?.message ?? e);
     // "No fundamentals/prices for this symbol" or a SimFin non-2xx (obscure / junk

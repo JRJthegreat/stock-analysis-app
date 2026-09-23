@@ -33,14 +33,23 @@ export async function fetchPeerComps(
   const symbols = await fetchPeers(ticker);
   if (!symbols.length) return null;
 
-  const settled = await Promise.allSettled(symbols.map((s) => fetchFinancials(s)));
+  // Fetch peers with a small concurrency cap rather than all at once. Firing six
+  // in parallel meant ~12 concurrent upstream calls, which tripped the data
+  // provider's burst rate limit and poisoned the MAIN analysis request alongside
+  // it. Comps are a nice-to-have; they must never cost the page its primary data.
   const peers: PeerSnapshot[] = [];
-  for (const r of settled) {
-    if (r.status === 'fulfilled') {
-      const f = r.value;
-      peers.push({ ticker: f.ticker, name: f.name, metrics: computeMetrics(f) });
+  const queue = [...symbols];
+  const worker = async () => {
+    for (let s = queue.shift(); s !== undefined; s = queue.shift()) {
+      try {
+        const f = await fetchFinancials(s);
+        peers.push({ ticker: f.ticker, name: f.name, metrics: computeMetrics(f) });
+      } catch {
+        // Individual peer failures are expected and tolerated.
+      }
     }
-  }
+  };
+  await Promise.all([worker(), worker()]); // concurrency: 2
   // Need a few real peers for the percentiles to mean anything. SimFin's sector-based
   // peers are noisy (obscure micro-caps that often fail to fetch), so hide the comps card
   // rather than show a misleading "vs 1 peer" read. (Proper peer quality is a follow-up.)

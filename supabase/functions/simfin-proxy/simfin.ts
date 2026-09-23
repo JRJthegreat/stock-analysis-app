@@ -31,15 +31,92 @@ const pos = (n: number | null | undefined) => Math.abs(n ?? 0) / MILLION; // mag
 
 // --- HTTP -----------------------------------------------------------------
 
-async function simfinGet(path: string, key: string): Promise<any> {
-  const res = await fetch(`${SIMFIN}${path}`, {
-    headers: { Authorization: key, accept: "application/json" },
-  });
-  if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    throw new Error(`SimFin ${path} -> HTTP ${res.status} ${body.slice(0, 160)}`);
+// SimFin's free tier rate-limits on BURSTS, not just daily volume: a handful of
+// concurrent requests returns 429 ("You have exhausted your API Request Quota")
+// even when the daily quota is untouched. A cold page load used to fan out ~16
+// concurrent calls (financials=2, prices=1, peers=1, plus 6 peers x 2), which
+// reliably tripped it and surfaced a raw SimFin error on first open.
+//
+// Two defences here: every SimFin call passes through a single-file gate with a
+// minimum spacing, and 429/5xx responses retry with exponential backoff + jitter.
+// `index.ts` adds the last line of defence (serve stale cache rather than error).
+
+/** Max SimFin calls in flight at once, per isolate. */
+const MAX_CONCURRENT = 1;
+/** Minimum gap between successive SimFin calls, per isolate. */
+const MIN_SPACING_MS = 220;
+/** Retry attempts for a throttled/transient response (total tries = 1 + this). */
+const MAX_RETRIES = 4;
+
+let active = 0;
+let lastStart = 0;
+const waiters: (() => void)[] = [];
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** Acquire the gate: caps concurrency AND enforces a minimum spacing. */
+async function acquire(): Promise<void> {
+  while (active >= MAX_CONCURRENT) {
+    await new Promise<void>((resolve) => waiters.push(resolve));
   }
-  return res.json();
+  active++;
+  const gap = Date.now() - lastStart;
+  if (gap < MIN_SPACING_MS) await sleep(MIN_SPACING_MS - gap);
+  lastStart = Date.now();
+}
+
+function release(): void {
+  active--;
+  waiters.shift()?.();
+}
+
+/** True for responses worth retrying: throttling (429) and transient 5xx. */
+const retryable = (status: number) => status === 429 || status >= 500;
+
+async function simfinGet(path: string, key: string): Promise<any> {
+  let lastStatus = 0;
+  let lastBody = "";
+
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    await acquire();
+    let res: Response;
+    try {
+      res = await fetch(`${SIMFIN}${path}`, {
+        headers: { Authorization: key, accept: "application/json" },
+      });
+    } catch (e) {
+      // Network blip — treat like a transient failure and retry.
+      release();
+      lastStatus = 0;
+      lastBody = String((e as Error)?.message ?? e);
+      if (attempt === MAX_RETRIES) break;
+      await sleep(backoffMs(attempt));
+      continue;
+    }
+    release();
+
+    if (res.ok) return res.json();
+
+    lastStatus = res.status;
+    lastBody = await res.text().catch(() => "");
+
+    if (!retryable(res.status) || attempt === MAX_RETRIES) break;
+
+    // Honour Retry-After when SimFin sends one, else exponential backoff.
+    const retryAfter = Number(res.headers.get("retry-after"));
+    const wait = Number.isFinite(retryAfter) && retryAfter > 0
+      ? Math.min(retryAfter * 1000, 8000)
+      : backoffMs(attempt);
+    await sleep(wait);
+  }
+
+  throw new Error(`SimFin ${path} -> HTTP ${lastStatus} ${lastBody.slice(0, 160)}`);
+}
+
+/** Exponential backoff with jitter: ~300ms, 600ms, 1.2s, 2.4s (capped 8s). */
+function backoffMs(attempt: number): number {
+  const base = Math.min(300 * 2 ** attempt, 8000);
+  return base + Math.random() * 250;
 }
 
 // --- compact-statement helpers -------------------------------------------
@@ -148,10 +225,13 @@ function latestPriceFacts(prices: CompactPrices | undefined) {
 /** Fetch statements (PL,BS,CF, FY) + prices, assemble the engine's `Financials`. */
 export async function fetchFinancials(ticker: string, key: string) {
   const sym = ticker.toUpperCase();
-  const [stmtsRes, pricesRes] = await Promise.all([
-    simfinGet(`/companies/statements/compact?ticker=${encodeURIComponent(sym)}&statements=PL,BS,CF&period=FY`, key),
-    simfinGet(`/companies/prices/compact?ticker=${encodeURIComponent(sym)}`, key),
-  ]);
+  // Sequential on purpose: firing these together is exactly the burst that trips
+  // SimFin's rate limiter (the gate in simfinGet would serialise them anyway).
+  const stmtsRes = await simfinGet(
+    `/companies/statements/compact?ticker=${encodeURIComponent(sym)}&statements=PL,BS,CF&period=FY`,
+    key,
+  );
+  const pricesRes = await simfinGet(`/companies/prices/compact?ticker=${encodeURIComponent(sym)}`, key);
 
   const company: Json | undefined = Array.isArray(stmtsRes) ? stmtsRes[0] : undefined;
   if (!company || !Array.isArray(company.statements)) throw new Error(`No fundamentals for ${sym}`);

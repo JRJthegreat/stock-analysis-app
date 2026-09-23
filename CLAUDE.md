@@ -114,8 +114,11 @@ npx serve out             # preview the production export (NOT `npm start`/`next
 npm test                  # Vitest — engine unit tests (vitest run)
 npm test -- valuation     # run a single spec by name (matches the file path/title)
 npm run typecheck         # tsc --noEmit (strict mode); `npx tsc --noEmit` also works
-npm run lint              # next lint
 ```
+
+> ⚠️ **`npm run lint` is broken — do not run it.** It maps to `next lint`, which is deprecated in
+> Next 15 and prompts interactively for an ESLint setup (ESLint is not installed). It will hang a
+> non-interactive session. The real gates are `npm test` + `npx tsc --noEmit` + `npm run build`.
 
 > Because `next.config.mjs` sets `output: 'export'`, **`npm start` (`next start`) does not work** —
 > there is no Node server. Serve the static `./out` directory with any static file server instead.
@@ -158,6 +161,9 @@ expectations. Keep new tests on `src/engine/` (pure functions); the UI layer is 
    `fmp-proxy`, so the app + engine are unchanged. `fmp-proxy` stays deployed as a paid fallback for
    micro-caps SimFin's ~5k list misses. Notes: beta defaults to 1 (SimFin has none); **peer comps are
    sector-based and noisy**, so the card hides when <3 valid peers (proper peer quality is a TODO).
+   The proxy also **resolves company names to tickers** (`resolveTicker` in `simfin.ts`: ticker
+   exact → name exact → starts-with → whole-word, against the long-TTL cached company list), so the
+   search box accepts "Apple" as well as "AAPL"; prices/peers inherit the resolution.
 5. ✅ **App wired to live data + engine v2 surfaced:** `src/data/fundamentals.ts` calls `simfin-proxy`
    (anon key + `NEXT_PUBLIC_SUPABASE_*`); the page fetches async with loading/error/race handling and
    runs `analyzeFinancials` (engine stays pure). `AnalysisView` shows the valuation range (bear/base/bull),
@@ -193,6 +199,37 @@ expectations. Keep new tests on `src/engine/` (pure functions); the UI layer is 
     ever needed, drop `output: 'export'` and host on Azure App Service / a container running `next start`.)
     Trading, if enabled, is regulated — the owner owns the compliance/legal posture.
 
+## Rate limiting (why first load used to fail)
+
+SimFin's free tier throttles **bursts**, not just daily volume — a handful of concurrent calls
+returns `429 "You have exhausted your API Request Quota"` with the daily quota untouched. A cold
+page load used to fan out ~16 concurrent SimFin calls (financials 2 + prices 1 + peers 1, then
+6 peers × 2), which reliably tripped it and surfaced a raw `SimFin … HTTP 429 …` banner on first
+open. Four defences now stand between that and the user — keep them in place:
+
+1. **Gate** (`simfin.ts`): every SimFin call passes a 1-at-a-time gate with ~220ms spacing, per isolate.
+2. **Retry** (`simfin.ts`): 429/5xx retry with exponential backoff + jitter, honouring `Retry-After`.
+3. **Stale-while-revalidate** (`index.ts`): if SimFin fails, serve the cached row at **any** age
+   (`source: "cache-stale"`, `stale: true`) rather than erroring. This is the hard guarantee — a
+   ticker that has ever been fetched can no longer error on load. Verified by pointing the function
+   at an invalid key: AAPL still served.
+4. **Client** (`src/data/`): transient errors retry with backoff; `friendlyError` never leaks raw
+   provider text; peer comps fetch at concurrency 2 (was 6-way parallel) so comps can't cost the
+   page its primary data.
+
+Edge isolates don't share the gate, so a genuinely huge concurrent burst of **uncached** tickers can
+still 429 — those have no cache row to fall back on. Normal usage doesn't reach that.
+
+## Known issues (open)
+
+- **SimFin free-tier price quality:** daily prices can be badly wrong for some large-caps
+  (observed ~10× off for MU), which skews market cap, multiples, and the sparkline. A more
+  reliable price source is needed before trusting price-derived outputs.
+- **Shared cache contamination:** `simfin-proxy` and `fmp-proxy` write to the same
+  `fundamentals_cache` table with the same bare-ticker key for `kind=financials` (see the
+  `cacheKey` lines in each function's `index.ts`), so one proxy can serve the other's cached
+  payload. Namespace the keys per source before leaning on the FMP fallback.
+
 ## Security flags (before any public release)
 
 - The Supabase **anon key + URL are public by design** and safe in the client. Real secrets
@@ -211,3 +248,8 @@ expectations. Keep new tests on `src/engine/` (pure functions); the UI layer is 
 - `ai-thesis` — Claude thesis layer (structured output, cites engine numbers). ✓ still apt.
 - `mobile-ui-engineer` / `rn-code-reviewer` — **legacy (React Native era).** The UI is now Next.js
   web; treat UI work as standard React + Tailwind. Their Expo/Expo-Go guidance no longer applies.
+
+Two other RN-era leftovers, harmless but misleading: `.claude/settings.json` still enables the
+`expo` plugin, and `supabase/README.md` still says "the mobile app" and documents only `fmp-proxy`
+(the live path is `simfin-proxy`). `AGENTS.md` is an 8-line stack summary that must stay consistent
+with the Stack section above.
